@@ -22,6 +22,9 @@ class MessageBusTerminal
 {
   friend class MessageBus<Message>;
 
+public:
+  using MessagePtr = std::shared_ptr<Message>;
+
 private:
   MessageBusTerminal(std::shared_ptr<message_bus_detail::MessageBusImpl<Message>> impl)
     : m_impl(std::move(impl))
@@ -37,14 +40,14 @@ public:
     return std::future<void>();
   }
 
-  std::shared_ptr<Message> rx_nonblocking()
+  MessagePtr rx_nonblocking()
   {
     return std::make_shared<Message>();
   }
 
-  std::future<std::shared_ptr<Message>> rx_blocking()
+  std::future<MessagePtr> rx_blockable()
   {
-    std::promise<std::shared_ptr<Message>> promise;
+    std::promise<MessagePtr> promise;
     promise.set_value(std::make_shared<Message>());
     return promise.get_future();
   }
