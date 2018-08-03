@@ -3,24 +3,31 @@
 #include <iostream>
 #include <thread>
 
-void ThreadOne(MessageBus::Terminal terminal)
-{
+using Bus = MessageBus<char>;
 
+void ThreadOne(Bus::Terminal terminal)
+{
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  auto message = terminal->rx_nonblocking();
+  std::cout << "1: received " << (message ? "a" : "no") << " message\n";
 }
 
-void ThreadTwo(MessageBus::Terminal terminal)
+void ThreadTwo(Bus::Terminal terminal)
 {
-
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  auto futureMessage = terminal->rx_blocking();
+  std::cout << "2: received " << (futureMessage.get() ? "a" : "no") << " message\n";
 }
 
-void ThreadThree(MessageBus::Terminal terminal)
+void ThreadThree(Bus::Terminal terminal)
 {
-
+  std::this_thread::sleep_for(std::chrono::seconds(3));
+  terminal->tx(1);
 }
 
 int main(int argc, char **argv)
 {
-  MessageBus messageBus;
+  Bus messageBus;
 
   std::thread threads[] {
     std::thread(ThreadOne, messageBus.GetTerminal())
