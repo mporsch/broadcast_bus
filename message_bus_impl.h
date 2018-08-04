@@ -7,10 +7,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <queue>
 #include <vector>
-
-template<typename Message>
-class MessageBusTerminal;
 
 namespace message_bus_detail
 {
@@ -23,6 +21,8 @@ namespace message_bus_detail
     struct TerminalImpl
     {
       Terminal *parent; // parent address used as ID
+      std::queue<MessagePtr> rxQueue; // queue of incoming Message
+      std::unique_ptr<std::promise<MessagePtr>> rxPromise; // promise to fulfill for rx_blockable()
 
       TerminalImpl(Terminal *parent)
         : parent(parent)
@@ -41,11 +41,21 @@ namespace message_bus_detail
       }
     };
 
-    Terminals terminals;
-    std::mutex mtx;
+    struct MessageAck
+    {
+      std::promise<void> promise; // promise to fulfill for tx()
 
-    MessageBusImpl()
-    {}
+      void operator()(Message *message)
+      {
+        if(message) {
+          promise.set_value();
+          delete message;
+        }
+      }
+    };
+
+    Terminals terminals; // list of attached terminals
+    std::mutex mtx; // concurrent access mutex
 
     ~MessageBusImpl()
     {
@@ -56,19 +66,64 @@ namespace message_bus_detail
     template<typename... Args>
     std::future<void> tx(Terminal *parent, Args... args)
     {
-      return std::future<void>();
+      std::lock_guard<std::mutex> lock(mtx);
+
+      // create the message with a custom deleter as receipt acknowledgement
+      auto message = MessagePtr(new Message(std::forward<Args>(args)...), MessageAck{});
+
+      // forward the message to all terminals except the transmitter
+      auto transmitter = terminals.find(parent);
+      assert(transmitter != std::end(terminals));
+      for(auto it = std::begin(terminals); it != std::end(terminals); ++it) {
+        if(it == transmitter) {
+        } else if (it->rxPromise) {
+          it->rxPromise->set_value(message);
+          it->rxPromise.reset();
+        } else {
+          it->rxQueue.push(message); // TODO final move instead of copy
+        }
+      }
+
+      // return the future for receipt acknowledgement
+      return std::get_deleter<MessageAck>(message)->promise.get_future();
     }
 
     MessagePtr rx_nonblocking(Terminal *parent)
     {
-      return std::make_shared<Message>();
+      std::lock_guard<std::mutex> lock(mtx);
+
+      MessagePtr ret{};
+
+      auto const terminal = terminals.find(parent);
+      assert(terminal != std::end(terminals));
+      if(terminal->rxQueue.empty()) {
+        // if there are no messages queued return a nullptr
+      } else {
+        // return the oldest queued message
+        ret = std::move(terminal->rxQueue.front());
+        terminal->rxQueue.pop();
+      }
+
+      return ret;
     }
 
     std::future<MessagePtr> rx_blockable(Terminal *parent)
     {
-      std::promise<MessagePtr> promise;
-      promise.set_value(std::make_shared<Message>());
-      return promise.get_future();
+      std::lock_guard<std::mutex> lock(mtx);
+
+      auto const terminal = terminals.find(parent);
+      assert(terminal != std::end(terminals));
+      if(terminal->rxQueue.empty()) {
+        // keep a promise for the next received message
+        terminal->rxPromise = std::make_unique<std::promise<MessagePtr>>();
+        return terminal->rxPromise->get_future();
+      } else {
+        // create a promise to fulfill immediately with the oldest queued message
+        std::promise<MessagePtr> promise;
+        promise.set_value(std::move(terminal->rxQueue.front()));
+        terminal->rxQueue.pop();
+        return promise.get_future();
+      }
     }
 
     void CreateTerminal(Terminal *parent)
@@ -95,7 +150,6 @@ MessageBusTerminal<Message>::MessageBusTerminal(std::shared_ptr<message_bus_deta
 {
   m_impl->CreateTerminal(this);
 }
-
 
 template<typename Message>
 MessageBusTerminal<Message>::~MessageBusTerminal()
@@ -135,7 +189,7 @@ MessageBus<Message>::~MessageBus()
 {}
 
 template<typename Message>
-typename MessageBus<Message>::Terminal MessageBus<Message>::GetTerminal()
+typename MessageBus<Message>::Terminal MessageBus<Message>::AttachTerminal()
 {
   return Terminal(new MessageBusTerminal<Message>(m_impl));
 }

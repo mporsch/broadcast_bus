@@ -22,16 +22,22 @@ public:
   using MessagePtr = std::shared_ptr<Message>;
 
 private:
+  /// created by MessageBus only
   MessageBusTerminal(std::shared_ptr<message_bus_detail::MessageBusImpl<Message>> impl);
 
 public:
   ~MessageBusTerminal();
 
+  /// transmit a message to all attached terminals
+  /// the returned future indicates complete receipt
   template<typename... Args>
   std::future<void> tx(Args... args);
 
+  /// check for a received message
+  /// the returned pointer may be null
   MessagePtr rx_nonblocking();
 
+  /// get a future for a message to be received
   std::future<MessagePtr> rx_blockable();
 
 private:
@@ -48,7 +54,9 @@ public:
   MessageBus();
   ~MessageBus();
 
-  Terminal GetTerminal();
+  /// attach an RX/TX terminal to the bus
+  /// will only receive future messages
+  Terminal AttachTerminal();
 
 private:
   std::shared_ptr<message_bus_detail::MessageBusImpl<Message>> m_impl;

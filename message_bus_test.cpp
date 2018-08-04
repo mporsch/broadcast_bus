@@ -36,6 +36,9 @@ void ThreadOne(Bus::Terminal terminal)
           break;
         case STEADY:
         {
+          // don't hold on to the received message while waiting
+          message.reset();
+
           std::unique_lock<std::mutex> lock(printMutex);
           auto futureTx = terminal->tx(GO);
           std::cout << "sending GO...";
@@ -56,9 +59,7 @@ void ThreadTwo(Bus::Terminal terminal)
   for(;;) {
     DoStuff();
 
-    auto futureMessage = terminal->rx_blockable();
-    auto message = futureMessage.get();
-    switch(*message) {
+    switch(*terminal->rx_blockable().get()) {
       case READY:
       {
         std::unique_lock<std::mutex> lock(printMutex);
@@ -92,8 +93,7 @@ void ThreadThree(Bus::Terminal terminal)
   for(;;) {
     DoStuff();
 
-    auto message = terminal->rx_blockable().get();
-    switch(*message) {
+    switch(*terminal->rx_blockable().get()) {
       case READY:
         assert(false);
       case STEADY:
@@ -105,15 +105,26 @@ void ThreadThree(Bus::Terminal terminal)
   }
 }
 
+void ThreadFour(Bus::Terminal terminal)
+{
+  DoStuff();
+
+  (void)terminal;
+  // leave the bus without receiving anything
+}
+
 int main(int argc, char **argv)
 {
   Bus messageBus;
 
   std::thread threads[] {
-    std::thread(ThreadOne, messageBus.GetTerminal())
-  , std::thread(ThreadTwo, messageBus.GetTerminal())
-  , std::thread(ThreadThree, messageBus.GetTerminal())
+    std::thread(ThreadOne, messageBus.AttachTerminal())
+  , std::thread(ThreadTwo, messageBus.AttachTerminal())
+  , std::thread(ThreadThree, messageBus.AttachTerminal())
+  , std::thread(ThreadFour, messageBus.AttachTerminal())
   };
+
+  // after the terminals are attached the MessageBus may as well go out of scope
 
   for(auto &&t : threads)
     if(t.joinable())
