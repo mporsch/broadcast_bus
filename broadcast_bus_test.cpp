@@ -14,12 +14,13 @@ enum Message
 };
 using Bus = BroadcastBus<Message>;
 
-std::mutex printMutex;                                     ///< Mutex to unmangle cout output
-std::default_random_engine generator;                      ///< Random generator
-std::uniform_int_distribution<int> distribution(1, 5000);  ///< Random distribution
+std::mutex printMutex;  ///< mutex to unmangle cout output
 
 void DoStuff()
 {
+  static std::default_random_engine generator;
+  static std::uniform_int_distribution<int> distribution(1, 5000);
+
   // simulate some processing delay
   std::this_thread::sleep_for(std::chrono::milliseconds(distribution(generator)));
 }
@@ -41,9 +42,9 @@ void ThreadOne(Bus::Terminal terminal)
 
           std::unique_lock<std::mutex> lock(printMutex);
           auto futureTx = terminal->tx(GO);
-          std::cout << "sending GO...";
+          std::cout << "sending GO..." << std::flush;
           futureTx.wait();
-          std::cout << " done\n";
+          std::cout << " done" << std::endl;
           return;
         }
         case GO:
@@ -64,9 +65,9 @@ void ThreadTwo(Bus::Terminal terminal)
       {
         std::unique_lock<std::mutex> lock(printMutex);
         auto futureTx = terminal->tx(STEADY);
-        std::cout << "sending STEADY...";
+        std::cout << "sending STEADY..." << std::flush;
         futureTx.wait();
-        std::cout << " done\n";
+        std::cout << " done" << std::endl;
         break;
       }
       case STEADY:
@@ -85,9 +86,9 @@ void ThreadThree(Bus::Terminal terminal)
   {
     std::unique_lock<std::mutex> lock(printMutex);
     auto futureTx = terminal->tx(READY);
-    std::cout << "sending READY...";
+    std::cout << "sending READY..." << std::flush;
     futureTx.wait();
-    std::cout << " done\n";
+    std::cout << " done" << std::endl;
   }
 
   for(;;) {
@@ -113,7 +114,7 @@ void ThreadFour(Bus::Terminal terminal)
   // leave the bus without receiving anything
 }
 
-int main(int argc, char **argv)
+int main(int /*argc*/, char **/*argv*/)
 {
   Bus broadcastBus;
 
