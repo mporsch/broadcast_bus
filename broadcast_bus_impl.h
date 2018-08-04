@@ -20,18 +20,18 @@ namespace broadcast_bus_detail
 
     struct TerminalImpl
     {
-      Terminal *parent; // parent address used as ID
+      Terminal const *parent; // parent address used as ID
       std::queue<MessagePtr> rxQueue; // queue of incoming Message
       std::unique_ptr<std::promise<MessagePtr>> rxPromise; // promise to fulfill for rx_blockable()
 
-      TerminalImpl(Terminal *parent)
+      TerminalImpl(Terminal const *parent)
         : parent(parent)
       {}
     };
 
     struct Terminals : public std::vector<TerminalImpl>
     {
-      typename std::vector<TerminalImpl>::iterator find(Terminal *parent)
+      typename std::vector<TerminalImpl>::iterator find(Terminal const *parent)
       {
         return std::find_if(this->begin(), this->end(),
           [&](TerminalImpl const &terminal) -> bool
@@ -64,21 +64,22 @@ namespace broadcast_bus_detail
     }
 
     template<typename... Args>
-    std::future<void> tx(Terminal *parent, Args... args)
+    std::future<void> tx(Terminal const *parent, Args... args)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
       // create the message with a custom deleter as receipt acknowledgement
-      auto message = MessagePtr(new Message(std::forward<Args>(args)...), MessageAck{});
+      auto const message = MessagePtr(
+        new Message(std::forward<Args>(args)...), MessageAck{});
 
       // forward the message to all terminals except the transmitter
-      for(auto it = std::begin(terminals); it != std::end(terminals); ++it) {
-        if(it->parent == parent) {
-        } else if (it->rxPromise) {
-          it->rxPromise->set_value(message);
-          it->rxPromise.reset();
+      for(auto &&terminal : terminals) {
+        if(terminal.parent == parent) {
+        } else if (terminal.rxPromise) {
+          terminal.rxPromise->set_value(message);
+          terminal.rxPromise.reset();
         } else {
-          it->rxQueue.push(message); // TODO final move instead of copy
+          terminal.rxQueue.push(message); // TODO final move instead of copy
         }
       }
 
@@ -86,7 +87,7 @@ namespace broadcast_bus_detail
       return std::get_deleter<MessageAck>(message)->promise.get_future();
     }
 
-    MessagePtr rx_nonblocking(Terminal *parent)
+    MessagePtr rx_nonblocking(Terminal const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -105,7 +106,7 @@ namespace broadcast_bus_detail
       return ret;
     }
 
-    std::future<MessagePtr> rx_blockable(Terminal *parent)
+    std::future<MessagePtr> rx_blockable(Terminal const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -124,26 +125,27 @@ namespace broadcast_bus_detail
       }
     }
 
-    void CreateTerminal(Terminal *parent)
+    void CreateTerminal(Terminal const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
       terminals.emplace_back(parent);
     }
 
-    void CloseTerminal(Terminal *parent)
+    void CloseTerminal(Terminal const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      auto const it = terminals.find(parent);
-      assert(it != std::end(terminals));
-      (void)terminals.erase(it);
+      auto const terminal = terminals.find(parent);
+      assert(terminal != std::end(terminals));
+      (void)terminals.erase(terminal);
     }
   };
 } // namespace broadcast_bus_detail
 
 template<typename Message>
-BroadcastBusTerminal<Message>::BroadcastBusTerminal(std::shared_ptr<broadcast_bus_detail::BroadcastBusImpl<Message>> impl)
+BroadcastBusTerminal<Message>::BroadcastBusTerminal(
+  std::shared_ptr<broadcast_bus_detail::BroadcastBusImpl<Message>> impl)
   : m_impl(std::move(impl))
 {
   m_impl->CreateTerminal(this);
