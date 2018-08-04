@@ -72,10 +72,8 @@ namespace broadcast_bus_detail
       auto message = MessagePtr(new Message(std::forward<Args>(args)...), MessageAck{});
 
       // forward the message to all terminals except the transmitter
-      auto transmitter = terminals.find(parent);
-      assert(transmitter != std::end(terminals));
       for(auto it = std::begin(terminals); it != std::end(terminals); ++it) {
-        if(it == transmitter) {
+        if(it->parent == parent) {
         } else if (it->rxPromise) {
           it->rxPromise->set_value(message);
           it->rxPromise.reset();
