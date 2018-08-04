@@ -1,21 +1,21 @@
-#ifndef MESSAGE_BUS_IMPL_H
-#define MESSAGE_BUS_IMPL_H
+#ifndef BROADCAST_BUS_IMPL_H
+#define BROADCAST_BUS_IMPL_H
 
-#ifndef MESSAGE_BUS_H
- #error "include via message_bus.h only"
-#endif // MESSAGE_BUS_H
+#ifndef BROADCAST_BUS_H
+ #error "include via broadcast_bus.h only"
+#endif // BROADCAST_BUS_H
 
 #include <algorithm>
 #include <cassert>
 #include <queue>
 #include <vector>
 
-namespace message_bus_detail
+namespace broadcast_bus_detail
 {
   template<typename Message>
-  struct MessageBusImpl
+  struct BroadcastBusImpl
   {
-    using Terminal = MessageBusTerminal<Message>;
+    using Terminal = BroadcastBusTerminal<Message>;
     using MessagePtr = typename Terminal::MessagePtr;
 
     struct TerminalImpl
@@ -57,7 +57,7 @@ namespace message_bus_detail
     Terminals terminals; // list of attached terminals
     std::mutex mtx; // concurrent access mutex
 
-    ~MessageBusImpl()
+    ~BroadcastBusImpl()
     {
       // all terminals must be closed before destroying the bus
       assert(terminals.empty());
@@ -142,56 +142,56 @@ namespace message_bus_detail
       (void)terminals.erase(it);
     }
   };
-} // namespace message_bus_detail
+} // namespace broadcast_bus_detail
 
 template<typename Message>
-MessageBusTerminal<Message>::MessageBusTerminal(std::shared_ptr<message_bus_detail::MessageBusImpl<Message>> impl)
+BroadcastBusTerminal<Message>::BroadcastBusTerminal(std::shared_ptr<broadcast_bus_detail::BroadcastBusImpl<Message>> impl)
   : m_impl(std::move(impl))
 {
   m_impl->CreateTerminal(this);
 }
 
 template<typename Message>
-MessageBusTerminal<Message>::~MessageBusTerminal()
+BroadcastBusTerminal<Message>::~BroadcastBusTerminal()
 {
   m_impl->CloseTerminal(this);
 }
 
 template<typename Message>
 template<typename... Args>
-std::future<void> MessageBusTerminal<Message>::tx(Args... args)
+std::future<void> BroadcastBusTerminal<Message>::tx(Args... args)
 {
   return m_impl->tx(this, std::forward<Args>(args)...);
 }
 
 template<typename Message>
-typename MessageBusTerminal<Message>::MessagePtr
-MessageBusTerminal<Message>::rx_nonblocking()
+typename BroadcastBusTerminal<Message>::MessagePtr
+BroadcastBusTerminal<Message>::rx_nonblocking()
 {
   return m_impl->rx_nonblocking(this);
 }
 
 template<typename Message>
-std::future<typename MessageBusTerminal<Message>::MessagePtr>
-MessageBusTerminal<Message>::rx_blockable()
+std::future<typename BroadcastBusTerminal<Message>::MessagePtr>
+BroadcastBusTerminal<Message>::rx_blockable()
 {
   return m_impl->rx_blockable(this);
 }
 
 
 template<typename Message>
-MessageBus<Message>::MessageBus()
-  : m_impl(std::make_shared<message_bus_detail::MessageBusImpl<Message>>())
+BroadcastBus<Message>::BroadcastBus()
+  : m_impl(std::make_shared<broadcast_bus_detail::BroadcastBusImpl<Message>>())
 {}
 
 template<typename Message>
-MessageBus<Message>::~MessageBus()
+BroadcastBus<Message>::~BroadcastBus()
 {}
 
 template<typename Message>
-typename MessageBus<Message>::Terminal MessageBus<Message>::AttachTerminal()
+typename BroadcastBus<Message>::Terminal BroadcastBus<Message>::AttachTerminal()
 {
-  return Terminal(new MessageBusTerminal<Message>(m_impl));
+  return Terminal(new BroadcastBusTerminal<Message>(m_impl));
 }
 
-#endif // MESSAGE_BUS_IMPL_H
+#endif // BROADCAST_BUS_IMPL_H

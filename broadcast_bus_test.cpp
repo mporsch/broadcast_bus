@@ -1,4 +1,4 @@
-#include "message_bus.h"
+#include "broadcast_bus.h"
 
 #include <cassert>
 #include <iostream>
@@ -12,7 +12,7 @@ enum Message
 , STEADY
 , GO
 };
-using Bus = MessageBus<Message>;
+using Bus = BroadcastBus<Message>;
 
 std::mutex printMutex;                                     ///< Mutex to unmangle cout output
 std::default_random_engine generator;                      ///< Random generator
@@ -115,16 +115,16 @@ void ThreadFour(Bus::Terminal terminal)
 
 int main(int argc, char **argv)
 {
-  Bus messageBus;
+  Bus broadcastBus;
 
   std::thread threads[] {
-    std::thread(ThreadOne, messageBus.AttachTerminal())
-  , std::thread(ThreadTwo, messageBus.AttachTerminal())
-  , std::thread(ThreadThree, messageBus.AttachTerminal())
-  , std::thread(ThreadFour, messageBus.AttachTerminal())
+    std::thread(ThreadOne, broadcastBus.AttachTerminal())
+  , std::thread(ThreadTwo, broadcastBus.AttachTerminal())
+  , std::thread(ThreadThree, broadcastBus.AttachTerminal())
+  , std::thread(ThreadFour, broadcastBus.AttachTerminal())
   };
 
-  // after the terminals are attached the MessageBus may as well go out of scope
+  // after the terminals are attached the BroadcastBus may as well go out of scope
 
   for(auto &&t : threads)
     if(t.joinable())
