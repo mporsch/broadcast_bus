@@ -70,7 +70,7 @@ namespace broadcast_bus_detail
     }
 
     template<typename... Args>
-    std::future<void> Tx(Terminal const *parent, Args... args)
+    std::future<void> Tx(Terminal const *parent, Args&&... args)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -187,7 +187,7 @@ BroadcastBusTerminal<Message>::~BroadcastBusTerminal()
 
 template<typename Message>
 template<typename... Args>
-std::future<void> BroadcastBusTerminal<Message>::Tx(Args... args)
+std::future<void> BroadcastBusTerminal<Message>::Tx(Args&&... args)
 {
   return m_impl->Tx(this, std::forward<Args>(args)...);
 }

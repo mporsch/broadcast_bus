@@ -31,7 +31,7 @@ public:
   /// transmit a message to all other attached terminals
   /// @return  future that indicates receipt at all other terminals
   template<typename... Args>
-  std::future<void> Tx(Args... args);
+  std::future<void> Tx(Args&&... args);
 
   /// check if a received message is available
   /// @note  may return false negatives under race conditions,
@@ -44,10 +44,10 @@ public:
   std::future<void> RxReady();
 
   /// check for a received message
-  /// @return  message pointer that may be null if IsRxReady()
-  ///          or WaitRxReady() have not signalled success
+  /// @return  message pointer that may be null if
+  ///          IsRxReady() or RxReady() have not signalled success
   /// @note  releasing the message triggers the TX acknowledgement
-  /// @note  release the message before sleeping to avoid bus deadlocks
+  /// @note  release messages before sleeping to avoid bus deadlocks
   MessagePtr Rx();
 
 private:
