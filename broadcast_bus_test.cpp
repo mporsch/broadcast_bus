@@ -1,6 +1,7 @@
 #include "broadcast_bus.h"
 
 #include <cassert>
+#include <csignal>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -15,6 +16,7 @@ enum Message
 using Bus = BroadcastBus<Message>;
 
 std::mutex printMutex;  ///< mutex to unmangle cout output
+bool shouldQuit = false;  ///< shutdown flag
 
 void DoStuff()
 {
@@ -122,22 +124,32 @@ void ThreadFour(Bus::Terminal terminal)
   // leave the bus without receiving anything
 }
 
+void Shutdown(int)
+{
+  shouldQuit = true;
+}
+
 int main(int /*argc*/, char **/*argv*/)
 {
+  if(signal(SIGINT, Shutdown))
+    return EXIT_FAILURE;
+
   Bus broadcastBus;
 
-  std::thread threads[] {
-    std::thread(ThreadOne, broadcastBus.AttachTerminal())
-  , std::thread(ThreadTwo, broadcastBus.AttachTerminal())
-  , std::thread(ThreadThree, broadcastBus.AttachTerminal())
-  , std::thread(ThreadFour, broadcastBus.AttachTerminal())
-  };
+  while(!shouldQuit) {
+    std::thread threads[] {
+      std::thread(ThreadOne, broadcastBus.AttachTerminal())
+    , std::thread(ThreadTwo, broadcastBus.AttachTerminal())
+    , std::thread(ThreadThree, broadcastBus.AttachTerminal())
+    , std::thread(ThreadFour, broadcastBus.AttachTerminal())
+    };
 
-  // after the terminals are attached the BroadcastBus may as well go out of scope
+    // after the terminals are attached the BroadcastBus may as well go out of scope
 
-  for(auto &&t : threads)
-    if(t.joinable())
-      t.join();
+    for(auto &&t : threads)
+      if(t.joinable())
+        t.join();
+  }
 
   return EXIT_SUCCESS;
 }
