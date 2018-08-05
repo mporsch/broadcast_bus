@@ -28,17 +28,27 @@ private:
 public:
   ~BroadcastBusTerminal();
 
-  /// transmit a message to all attached terminals
-  /// the returned future indicates complete receipt
+  /// transmit a message to all other attached terminals
+  /// @return  future that indicates receipt at all other terminals
   template<typename... Args>
-  std::future<void> tx(Args... args);
+  std::future<void> Tx(Args... args);
 
-  /// check for a received message
-  /// the returned pointer may be null
-  MessagePtr rx_nonblocking();
+  /// check if a received message is available
+  /// @note  may return false negatives under race conditions,
+  ///        but not false positives
+  bool IsRxReady() const;
 
   /// get a future for a message to be received
-  std::future<MessagePtr> rx_blockable();
+  /// @note  timeout-waiting on the future may cause false negatives
+  ///        under race conditions, but not false positives
+  std::future<void> RxReady();
+
+  /// check for a received message
+  /// @return  message pointer that may be null if IsRxReady()
+  ///          or WaitRxReady() have not signalled success
+  /// @note  releasing the message triggers the TX acknowledgement
+  /// @note  release the message before sleeping to avoid bus deadlocks
+  MessagePtr Rx();
 
 private:
   std::shared_ptr<broadcast_bus_detail::BroadcastBusImpl<Message>> m_impl;
@@ -55,7 +65,7 @@ public:
   ~BroadcastBus();
 
   /// attach an RX/TX terminal to the bus
-  /// will only receive future messages
+  /// @note  will only receive future messages
   Terminal AttachTerminal();
 
 private:

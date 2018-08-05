@@ -21,29 +21,35 @@ namespace broadcast_bus_detail
     struct TerminalImpl
     {
       Terminal const *parent; // parent address used as ID
-      std::queue<MessagePtr> rxQueue; // queue of incoming Message
-      std::unique_ptr<std::promise<MessagePtr>> rxPromise; // promise to fulfill for rx_blockable()
+      std::queue<MessagePtr> rxq; // queue of incoming Message
+      std::unique_ptr<std::promise<void>> promise; // RX promise to fulfill
 
       TerminalImpl(Terminal const *parent)
         : parent(parent)
       {}
+
+      bool operator==(TerminalImpl const &other) const
+      {
+        return (parent == other.parent);
+      }
     };
 
     struct Terminals : public std::vector<TerminalImpl>
     {
+      typename std::vector<TerminalImpl>::const_iterator find(Terminal const *parent) const
+      {
+        return std::find(this->begin(), this->end(), parent);
+      }
+
       typename std::vector<TerminalImpl>::iterator find(Terminal const *parent)
       {
-        return std::find_if(this->begin(), this->end(),
-          [&](TerminalImpl const &terminal) -> bool
-          {
-            return (parent == terminal.parent);
-          });
+        return std::find(this->begin(), this->end(), parent);
       }
     };
 
     struct MessageAck
     {
-      std::promise<void> promise; // promise to fulfill for tx()
+      std::promise<void> promise; // promise to fulfill for TX
 
       void operator()(Message *message)
       {
@@ -55,7 +61,7 @@ namespace broadcast_bus_detail
     };
 
     Terminals terminals; // list of attached terminals
-    std::mutex mtx; // concurrent access mutex
+    mutable std::mutex mtx; // concurrent access mutex
 
     ~BroadcastBusImpl()
     {
@@ -64,30 +70,71 @@ namespace broadcast_bus_detail
     }
 
     template<typename... Args>
-    std::future<void> tx(Terminal const *parent, Args... args)
+    std::future<void> Tx(Terminal const *parent, Args... args)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      // create the message with a custom deleter as receipt acknowledgement
-      auto const message = MessagePtr(
-        new Message(std::forward<Args>(args)...), MessageAck{});
+      if(terminals.size() > 1U) {
+        // dumb pointer to avoid unneccesary shared_ptr copies
+        MessagePtr *message = nullptr;
 
-      // forward the message to all terminals except the transmitter
-      for(auto &&terminal : terminals) {
-        if(terminal.parent == parent) {
-        } else if (terminal.rxPromise) {
-          terminal.rxPromise->set_value(message);
-          terminal.rxPromise.reset();
-        } else {
-          terminal.rxQueue.push(message); // TODO final move instead of copy
+        // share the message with all terminals except the transmitter
+        for(auto &&terminal : terminals) {
+          if(terminal.parent == parent) {
+          } else {
+            if(message) {
+              terminal.rxq.emplace(*message);
+            } else { // create the message with a custom deleter as receipt acknowledgement
+              terminal.rxq.emplace(new Message(std::forward<Args>(args)...), MessageAck{});
+              message = &terminal.rxq.back();
+            }
+
+            // notify if the terminal was waiting for RX
+            if (terminal.promise) {
+              terminal.promise->set_value();
+              terminal.promise.reset();
+            }
+          }
         }
-      }
+        assert(message);
 
-      // return the future for receipt acknowledgement
-      return std::get_deleter<MessageAck>(message)->promise.get_future();
+        // return the future for receipt acknowledgement
+        return std::get_deleter<MessageAck>(*message)->promise.get_future();
+      } else {
+        std::promise<void> promise;
+        promise.set_value();
+        return promise.get_future();
+      }
     }
 
-    MessagePtr rx_nonblocking(Terminal const *parent)
+    bool IsRxReady(Terminal const *parent) const
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+
+      auto const terminal = terminals.find(parent);
+      assert(terminal != std::end(terminals));
+      return !terminal->rxq.empty();
+    }
+
+    std::future<void> RxReady(Terminal const *parent)
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+
+      auto const terminal = terminals.find(parent);
+      assert(terminal != std::end(terminals));
+      if(terminal->rxq.empty()) {
+        // keep a promise for the next received message
+        terminal->promise = std::make_unique<std::promise<void>>();
+        return terminal->promise->get_future();
+      } else {
+        // create a promise to fulfill immediately
+        std::promise<void> promise;
+        promise.set_value();
+        return promise.get_future();
+      }
+    }
+
+    MessagePtr Rx(Terminal const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -95,34 +142,15 @@ namespace broadcast_bus_detail
 
       auto const terminal = terminals.find(parent);
       assert(terminal != std::end(terminals));
-      if(terminal->rxQueue.empty()) {
+      if(terminal->rxq.empty()) {
         // if there are no messages queued return a nullptr
       } else {
         // return the oldest queued message
-        ret = std::move(terminal->rxQueue.front());
-        terminal->rxQueue.pop();
+        ret = std::move(terminal->rxq.front());
+        terminal->rxq.pop();
       }
 
       return ret;
-    }
-
-    std::future<MessagePtr> rx_blockable(Terminal const *parent)
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-
-      auto const terminal = terminals.find(parent);
-      assert(terminal != std::end(terminals));
-      if(terminal->rxQueue.empty()) {
-        // keep a promise for the next received message
-        terminal->rxPromise = std::make_unique<std::promise<MessagePtr>>();
-        return terminal->rxPromise->get_future();
-      } else {
-        // create a promise to fulfill immediately with the oldest queued message
-        std::promise<MessagePtr> promise;
-        promise.set_value(std::move(terminal->rxQueue.front()));
-        terminal->rxQueue.pop();
-        return promise.get_future();
-      }
     }
 
     void CreateTerminal(Terminal const *parent)
@@ -159,23 +187,28 @@ BroadcastBusTerminal<Message>::~BroadcastBusTerminal()
 
 template<typename Message>
 template<typename... Args>
-std::future<void> BroadcastBusTerminal<Message>::tx(Args... args)
+std::future<void> BroadcastBusTerminal<Message>::Tx(Args... args)
 {
-  return m_impl->tx(this, std::forward<Args>(args)...);
+  return m_impl->Tx(this, std::forward<Args>(args)...);
+}
+
+template<typename Message>
+bool BroadcastBusTerminal<Message>::IsRxReady() const
+{
+  return m_impl->IsRxReady(this);
+}
+
+template<typename Message>
+std::future<void> BroadcastBusTerminal<Message>::RxReady()
+{
+  return m_impl->RxReady(this);
 }
 
 template<typename Message>
 typename BroadcastBusTerminal<Message>::MessagePtr
-BroadcastBusTerminal<Message>::rx_nonblocking()
+BroadcastBusTerminal<Message>::Rx()
 {
-  return m_impl->rx_nonblocking(this);
-}
-
-template<typename Message>
-std::future<typename BroadcastBusTerminal<Message>::MessagePtr>
-BroadcastBusTerminal<Message>::rx_blockable()
-{
-  return m_impl->rx_blockable(this);
+  return m_impl->Rx(this);
 }
 
 

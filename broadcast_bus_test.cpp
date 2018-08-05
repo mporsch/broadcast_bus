@@ -30,7 +30,7 @@ void ThreadOne(Bus::Terminal terminal)
   for(;;) {
     DoStuff();
 
-    auto message = terminal->rx_nonblocking();
+    auto message = terminal->Rx();
     if(message) {
       switch(*message) {
         case READY:
@@ -41,7 +41,7 @@ void ThreadOne(Bus::Terminal terminal)
           message.reset();
 
           std::unique_lock<std::mutex> lock(printMutex);
-          auto futureTx = terminal->tx(GO);
+          auto futureTx = terminal->Tx(GO);
           std::cout << "sending GO..." << std::flush;
           futureTx.wait();
           std::cout << " done" << std::endl;
@@ -60,21 +60,28 @@ void ThreadTwo(Bus::Terminal terminal)
   for(;;) {
     DoStuff();
 
-    switch(*terminal->rx_blockable().get()) {
-      case READY:
-      {
-        std::unique_lock<std::mutex> lock(printMutex);
-        auto futureTx = terminal->tx(STEADY);
-        std::cout << "sending STEADY..." << std::flush;
-        futureTx.wait();
-        std::cout << " done" << std::endl;
-        break;
+    if(terminal->IsRxReady()) {
+      auto message = terminal->Rx();
+      assert(message);
+      switch(*message) {
+        case READY:
+        {
+          // don't hold on to the received message while waiting
+          message.reset();
+
+          std::unique_lock<std::mutex> lock(printMutex);
+          auto futureTx = terminal->Tx(STEADY);
+          std::cout << "sending STEADY..." << std::flush;
+          futureTx.wait();
+          std::cout << " done" << std::endl;
+          break;
+        }
+        case STEADY:
+          assert(false);
+        case GO:
+        default:
+          return;
       }
-      case STEADY:
-        assert(false);
-      case GO:
-      default:
-        return;
     }
   }
 }
@@ -85,7 +92,7 @@ void ThreadThree(Bus::Terminal terminal)
 
   {
     std::unique_lock<std::mutex> lock(printMutex);
-    auto futureTx = terminal->tx(READY);
+    auto futureTx = terminal->Tx(READY);
     std::cout << "sending READY..." << std::flush;
     futureTx.wait();
     std::cout << " done" << std::endl;
@@ -94,7 +101,8 @@ void ThreadThree(Bus::Terminal terminal)
   for(;;) {
     DoStuff();
 
-    switch(*terminal->rx_blockable().get()) {
+    terminal->RxReady().wait();
+    switch(*terminal->Rx()) {
       case READY:
         assert(false);
       case STEADY:
